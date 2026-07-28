@@ -358,14 +358,35 @@ const BotServers = async (req, res) => {
   try {
     const { id } = req.params;
     const bot = await getBotById(id);
-    if (!bot) return res.status(200).json({ message: "Bot bulunamadı." });
+    if (!bot) return res.status(200).json({ status: false, message: "Bot bulunamadı." });
 
     const index = botList.findIndex(b => b.token === bot.token);
- 
-    const iBot = botList[index].client
-    if(!iBot) return res.status(200).json({ status: true, message: "Bot başlatılmamış!" });
+    if (index === -1 || !botList[index]?.client) {
+      return res.status(200).json({ status: false, message: "Bot başlatılmamış!" });
+    }
 
-    const servers = iBot.guilds.cache || null
+    const iBot = botList[index].client;
+    if (!iBot.isReady()) {
+      return res.status(200).json({ status: false, message: "Bot henüz hazır değil, lütfen bekleyin." });
+    }
+
+    let guildsCollection = iBot.guilds.cache;
+    if (!guildsCollection || guildsCollection.size === 0) {
+      try {
+        guildsCollection = await iBot.guilds.fetch();
+      } catch (fetchErr) {
+        console.warn("[bot controller - BotServers]: guilds.fetch failed, using cache:", fetchErr.message);
+      }
+    }
+
+    const servers = guildsCollection
+      ? guildsCollection.map(guild => ({
+          id: guild.id,
+          name: guild.name,
+          icon: guild.icon,
+          memberCount: guild.memberCount
+        }))
+      : [];
 
     return res.status(200).json({ status: true, message: "Sunucular çekildi", data: servers });
   } catch (err) {
@@ -377,21 +398,66 @@ const BotServers = async (req, res) => {
 const GetBotData = async (req, res) => {
   try {
     const { id, guildId } = req.params;
+
+    if (!guildId || guildId === 'undefined') {
+      return res.status(200).json({ status: false, message: "Sunucu ID geçersiz." });
+    }
+
     const bot = await getBotById(id);
-    if (!bot) return res.status(200).json({ message: "Veri bulunamadı." });
+    if (!bot) return res.status(200).json({ status: false, message: "Veri bulunamadı." });
 
     const index = botList.findIndex(b => b.token === bot.token);
- 
-    const iBot = botList[index].client
-	  if(!iBot) return res.status(200).json({ status: true, message: "Bot başlatılmamış!" });
+    if (index === -1 || !botList[index]?.client) {
+      return res.status(200).json({ status: false, message: "Bot başlatılmamış!" });
+    }
 
-	  const server = await iBot.guilds.fetch(guildId)
+    const iBot = botList[index].client;
+    const server = await iBot.guilds.fetch(guildId).catch(() => null);
 
-    const roles = await server.roles.fetch()
-    const channels = await server.channels.fetch()
-    const members = await server.members.fetch()
+    if (!server) {
+      return res.status(200).json({ status: false, message: "Sunucu bulunamadı." });
+    }
 
-    const data = { roles, channels, members }
+    const rolesCache = await server.roles.fetch().catch(() => null);
+    const channelsCache = await server.channels.fetch().catch(() => null);
+    const membersCache = await server.members.fetch().catch(() => null);
+
+    const roles = rolesCache
+      ? rolesCache.map(role => ({
+          id: role.id,
+          name: role.name,
+          color: role.color
+        })).filter(r => r.name !== '@everyone')
+      : [];
+
+    const textBasedChannelTypes = [0, 5, 10, 11, 12, 15, 16];
+    const channels = channelsCache
+      ? channelsCache
+        .filter(ch => {
+          if (!textBasedChannelTypes.includes(ch.type)) return false;
+          try {
+            const perms = typeof ch.permissionsFor === 'function' ? ch.permissionsFor(iBot.user.id) : null;
+            if (perms && !perms.has('SendMessages')) return false;
+          } catch (e) {
+          }
+          return true;
+        })
+        .map(channel => ({
+          id: channel.id,
+          name: channel.name,
+          type: channel.type
+        }))
+      : [];
+
+    const members = membersCache
+      ? membersCache.map(member => ({
+          userId: member.user.id,
+          displayName: member.displayName || member.user.username,
+          userTag: member.user.tag
+        }))
+      : [];
+
+    const data = { roles, channels, members };
 
     return res.status(200).json({ status: true, message: "Veriler çekildi", data: data });
 

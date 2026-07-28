@@ -107,20 +107,23 @@ export default function BotPage() {
             fetchBotStatus(botId)
         } catch (error) {
             showToast({
-                message: 'Bot durduruldu.',
+                message: 'Bot durdurulamadı.',
                 type: 'error',
                 id: 'bot-stop-error',
                 duration: 3000
             });
-            console.error('Error stoping bot:', error);
+            console.error('Error stopping bot:', error);
         }
     }
 
 	async function getServers(){
-		const result = await botAPI.servers(botId)
-		console.log("rr", result)
-		if(!result?.status) return
-		setServers(result?.data)
+        try {
+            const result = await botAPI.servers(botId)
+            if(!result?.status) return
+            setServers(result?.data || [])
+        } catch (error) {
+            console.error("Error fetching servers:", error);
+        }
 	}
 
     useEffect(() => {
